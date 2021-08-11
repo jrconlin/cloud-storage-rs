@@ -1,7 +1,8 @@
 #![allow(unused_imports)]
 
+use crate::error::GoogleResponse;
+use crate::resources::common::ListResponse;
 pub use crate::resources::common::{Entity, ProjectTeam, Role};
-use crate::{error::GoogleResponse, resources::common::ListResponse};
 
 /// The ObjectAccessControls resources represent the Access Control Lists (ACLs) for objects within
 /// Google Cloud Storage. ACLs let you specify who has access to your data and to what extent.
@@ -109,29 +110,38 @@ impl ObjectAccessControl {
     /// This method fails with a 400 Bad Request response for buckets with uniform
     /// bucket-level access enabled. Use `Bucket::get_iam_policy` and `Bucket::set_iam_policy` to
     /// control access instead.
-    #[cfg(feature = "global-client")]
     pub async fn create(
         bucket: &str,
         object: &str,
         new_object_access_control: &NewObjectAccessControl,
     ) -> crate::Result<Self> {
-        crate::CLOUD_CLIENT
-            .object_access_control()
-            .create(bucket, object, new_object_access_control)
-            .await
+        let url = format!("{}/b/{}/o/{}/acl", crate::BASE_URL, bucket, object);
+        let result: GoogleResponse<Self> = reqwest::Client::new()
+            .post(&url)
+            .headers(crate::get_headers().await?)
+            .json(new_object_access_control)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(s) => Ok(s),
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
-    /// The synchronous equivalent of `ObjectAccessControl::create`.
+    /// The sync equivalent of `ObjectAccessControl::create`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn create_sync(
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn create_sync(
         bucket: &str,
         object: &str,
         new_object_access_control: &NewObjectAccessControl,
     ) -> crate::Result<Self> {
-        crate::runtime()?.block_on(Self::create(bucket, object, new_object_access_control))
+        Self::create(bucket, object, new_object_access_control).await
     }
 
     /// Retrieves `ACL` entries on the specified object.
@@ -140,21 +150,29 @@ impl ObjectAccessControl {
     /// Important: This method fails with a 400 Bad Request response for buckets with uniform
     /// bucket-level access enabled. Use `Bucket::get_iam_policy` and `Bucket::set_iam_policy` to
     /// control access instead.
-    #[cfg(feature = "global-client")]
     pub async fn list(bucket: &str, object: &str) -> crate::Result<Vec<Self>> {
-        crate::CLOUD_CLIENT
-            .object_access_control()
-            .list(bucket, object)
-            .await
+        let url = format!("{}/b/{}/o/{}/acl", crate::BASE_URL, bucket, object);
+        let result: GoogleResponse<ListResponse<Self>> = reqwest::Client::new()
+            .get(&url)
+            .headers(crate::get_headers().await?)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(s) => Ok(s.items),
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
-    /// The synchronous equivalent of `ObjectAccessControl::list`.
+    /// The sync equivalent of `ObjectAccessControl::list`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn list_sync(bucket: &str, object: &str) -> crate::Result<Vec<Self>> {
-        crate::runtime()?.block_on(Self::list(bucket, object))
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn list_sync(bucket: &str, object: &str) -> crate::Result<Vec<Self>> {
+        Self::list(bucket, object).await
     }
 
     /// Returns the `ACL` entry for the specified entity on the specified bucket.
@@ -163,21 +181,35 @@ impl ObjectAccessControl {
     /// Important: This method fails with a 400 Bad Request response for buckets with uniform
     /// bucket-level access enabled. Use `Bucket::get_iam_policy` and `Bucket::set_iam_policy` to
     /// control access instead.
-    #[cfg(feature = "global-client")]
     pub async fn read(bucket: &str, object: &str, entity: &Entity) -> crate::Result<Self> {
-        crate::CLOUD_CLIENT
-            .object_access_control()
-            .read(bucket, object, entity)
-            .await
+        let url = format!(
+            "{}/b/{}/o/{}/acl/{}",
+            crate::BASE_URL,
+            bucket,
+            object,
+            entity
+        );
+        let result: GoogleResponse<Self> = reqwest::Client::new()
+            .get(&url)
+            .headers(crate::get_headers().await?)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(s) => Ok(s),
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
-    /// The synchronous equivalent of `ObjectAccessControl::read`.
+    /// The sync equivalent of `ObjectAccessControl::read`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn read_sync(bucket: &str, object: &str, entity: &Entity) -> crate::Result<Self> {
-        crate::runtime()?.block_on(Self::read(bucket, object, entity))
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn read_sync(bucket: &str, object: &str, entity: &Entity) -> crate::Result<Self> {
+        Self::read(bucket, object, entity).await
     }
 
     /// Updates an ACL entry on the specified object.
@@ -186,21 +218,36 @@ impl ObjectAccessControl {
     /// Important: This method fails with a 400 Bad Request response for buckets with uniform
     /// bucket-level access enabled. Use `Bucket::get_iam_policy` and `Bucket::set_iam_policy` to
     /// control access instead.
-    #[cfg(feature = "global-client")]
     pub async fn update(&self) -> crate::Result<Self> {
-        crate::CLOUD_CLIENT
-            .object_access_control()
-            .update(self)
-            .await
+        let url = format!(
+            "{}/b/{}/o/{}/acl/{}",
+            crate::BASE_URL,
+            self.bucket,
+            self.object,
+            self.entity,
+        );
+        let result: GoogleResponse<Self> = reqwest::Client::new()
+            .put(&url)
+            .headers(crate::get_headers().await?)
+            .json(self)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(s) => Ok(s),
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
-    /// The synchronous equivalent of `ObjectAccessControl::update`.
+    /// The sync equivalent of `ObjectAccessControl::update`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn update_sync(&self) -> crate::Result<Self> {
-        crate::runtime()?.block_on(self.update())
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn update_sync(&self) -> crate::Result<Self> {
+        self.update().await
     }
 
     /// Permanently deletes the ACL entry for the specified entity on the specified object.
@@ -209,25 +256,38 @@ impl ObjectAccessControl {
     /// Important: This method fails with a 400 Bad Request response for buckets with uniform
     /// bucket-level access enabled. Use `Bucket::get_iam_policy` and `Bucket::set_iam_policy` to
     /// control access instead.
-    #[cfg(feature = "global-client")]
     pub async fn delete(self) -> crate::Result<()> {
-        crate::CLOUD_CLIENT
-            .object_access_control()
-            .delete(self)
-            .await
+        let url = format!(
+            "{}/b/{}/o/{}/acl/{}",
+            crate::BASE_URL,
+            self.bucket,
+            self.object,
+            self.entity,
+        );
+        let response = reqwest::Client::new()
+            .delete(&url)
+            .headers(crate::get_headers().await?)
+            .send()
+            .await?;
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(crate::Error::Google(response.json().await?))
+        }
     }
 
-    /// The synchronous equivalent of `ObjectAccessControl::delete`.
+    /// The sync equivalent of `ObjectAccessControl::delete`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn delete_sync(self) -> crate::Result<()> {
-        crate::runtime()?.block_on(self.delete())
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn delete_sync(self) -> crate::Result<()> {
+        self.delete().await
     }
 }
 
-#[cfg(all(test, feature = "global-client"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::Object;
@@ -348,7 +408,7 @@ mod tests {
         bucket.delete().await.unwrap();
     }
 
-    #[cfg(all(feature = "global-client", feature = "sync"))]
+    #[cfg(feature = "sync")]
     mod sync {
         use super::*;
 

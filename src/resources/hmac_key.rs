@@ -59,8 +59,8 @@ pub enum HmacState {
 }
 
 #[derive(Debug, serde::Deserialize)]
-pub(crate) struct ListResponse {
-    pub(crate) items: Vec<HmacMeta>,
+struct ListResponse {
+    items: Vec<HmacMeta>,
 }
 
 #[derive(serde::Serialize)]
@@ -70,8 +70,8 @@ struct UpdateRequest {
 }
 
 #[derive(serde::Serialize)]
-pub(crate) struct UpdateMeta {
-    pub(crate) state: HmacState,
+struct UpdateMeta {
+    state: HmacState,
 }
 
 impl HmacKey {
@@ -95,18 +95,39 @@ impl HmacKey {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "global-client")]
     pub async fn create() -> crate::Result<Self> {
-        crate::CLOUD_CLIENT.hmac_key().create().await
+        use reqwest::header::CONTENT_LENGTH;
+
+        let url = format!(
+            "{}/projects/{}/hmacKeys",
+            crate::BASE_URL,
+            crate::SERVICE_ACCOUNT.project_id
+        );
+        let query = [("serviceAccountEmail", &crate::SERVICE_ACCOUNT.client_email)];
+        let mut headers = crate::get_headers().await?;
+        headers.insert(CONTENT_LENGTH, 0.into());
+        let result: GoogleResponse<Self> = reqwest::Client::new()
+            .post(&url)
+            .headers(headers)
+            .query(&query)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(s) => Ok(s),
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
     /// The synchronous equivalent of `HmacKey::create`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn create_sync() -> crate::Result<Self> {
-        crate::runtime()?.block_on(Self::create())
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn create_sync() -> crate::Result<Self> {
+        Self::create().await
     }
 
     /// Retrieves a list of HMAC keys matching the criteria. Since the HmacKey is secret, this does
@@ -128,18 +149,41 @@ impl HmacKey {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "global-client")]
     pub async fn list() -> crate::Result<Vec<HmacMeta>> {
-        crate::CLOUD_CLIENT.hmac_key().list().await
+        let url = format!(
+            "{}/projects/{}/hmacKeys",
+            crate::BASE_URL,
+            crate::SERVICE_ACCOUNT.project_id
+        );
+        let response = reqwest::Client::new()
+            .get(&url)
+            .headers(crate::get_headers().await?)
+            .send()
+            .await?
+            .text()
+            .await?;
+        let result: Result<GoogleResponse<ListResponse>, _> = serde_json::from_str(&response);
+
+        // This function rquires more complicated error handling because when there is only one
+        // entry, Google will return the response `{ "kind": "storage#hmacKeysMetadata" }` instead
+        // of a list with one element. This breaks the parser.
+        match result {
+            Ok(parsed) => match parsed {
+                GoogleResponse::Success(s) => Ok(s.items),
+                GoogleResponse::Error(e) => Err(e.into()),
+            },
+            Err(_) => Ok(vec![]),
+        }
     }
 
-    /// The synchronous equivalent of `HmacKey::list`.
+    /// The async equivalent of `HmacKey::list`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn list_sync() -> crate::Result<Vec<HmacMeta>> {
-        crate::runtime()?.block_on(Self::list())
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn list_sync() -> crate::Result<Vec<HmacMeta>> {
+        Self::list().await
     }
 
     /// Retrieves an HMAC key's metadata. Since the HmacKey is secret, this does not return a
@@ -160,18 +204,34 @@ impl HmacKey {
     /// let key = HmacKey::read("some identifier").await?;
     /// # Ok(())
     /// # }
-    #[cfg(feature = "global-client")]
     pub async fn read(access_id: &str) -> crate::Result<HmacMeta> {
-        crate::CLOUD_CLIENT.hmac_key().read(access_id).await
+        let url = format!(
+            "{}/projects/{}/hmacKeys/{}",
+            crate::BASE_URL,
+            crate::SERVICE_ACCOUNT.project_id,
+            access_id
+        );
+        let result: GoogleResponse<HmacMeta> = reqwest::Client::new()
+            .get(&url)
+            .headers(crate::get_headers().await?)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(s) => Ok(s),
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
     /// The synchronous equivalent of `HmacKey::read`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn read_sync(access_id: &str) -> crate::Result<HmacMeta> {
-        crate::runtime()?.block_on(Self::read(access_id))
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn read_sync(access_id: &str) -> crate::Result<HmacMeta> {
+        Self::read(access_id).await
     }
 
     /// Updates the state of an HMAC key. See the HMAC Key resource descriptor for valid states.
@@ -192,21 +252,36 @@ impl HmacKey {
     /// let key = HmacKey::update("your key", HmacState::Active).await?;
     /// # Ok(())
     /// # }
-    #[cfg(feature = "global-client")]
     pub async fn update(access_id: &str, state: HmacState) -> crate::Result<HmacMeta> {
-        crate::CLOUD_CLIENT
-            .hmac_key()
-            .update(access_id, state)
-            .await
+        let url = format!(
+            "{}/projects/{}/hmacKeys/{}",
+            crate::BASE_URL,
+            crate::SERVICE_ACCOUNT.project_id,
+            access_id
+        );
+        serde_json::to_string(&UpdateMeta { state })?;
+        let result: GoogleResponse<HmacMeta> = reqwest::Client::new()
+            .put(&url)
+            .headers(crate::get_headers().await?)
+            .json(&UpdateMeta { state })
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(s) => Ok(s),
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
     /// The synchronous equivalent of `HmacKey::update`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn update_sync(access_id: &str, state: HmacState) -> crate::Result<HmacMeta> {
-        crate::runtime()?.block_on(Self::update(access_id, state))
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn update_sync(access_id: &str, state: HmacState) -> crate::Result<HmacMeta> {
+        Self::update(access_id, state).await
     }
 
     /// Deletes an HMAC key. Note that a key must be set to `Inactive` first.
@@ -226,19 +301,34 @@ impl HmacKey {
     /// HmacKey::delete(&key.access_id).await?;
     /// # Ok(())
     /// # }
-    #[cfg(feature = "global-client")]
     pub async fn delete(access_id: &str) -> crate::Result<()> {
-        crate::CLOUD_CLIENT.hmac_key().delete(access_id).await
+        let url = format!(
+            "{}/projects/{}/hmacKeys/{}",
+            crate::BASE_URL,
+            crate::SERVICE_ACCOUNT.project_id,
+            access_id
+        );
+        let response = reqwest::Client::new()
+            .delete(&url)
+            .headers(crate::get_headers().await?)
+            .send()
+            .await?;
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(crate::Error::Google(response.json().await?))
+        }
     }
 
     /// The synchronous equivalent of `HmacKey::delete`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn delete_sync(access_id: &str) -> crate::Result<()> {
-        crate::runtime()?.block_on(Self::delete(access_id))
+    #[tokio::main]
+    #[cfg(feature = "sync")]
+    pub async fn delete_sync(access_id: &str) -> crate::Result<()> {
+        Self::delete(access_id).await
     }
 }
 
-#[cfg(all(test, feature = "global-client"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -305,7 +395,7 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(all(feature = "global-client", feature = "sync"))]
+    #[cfg(feature = "sync")]
     mod sync {
         use super::*;
 

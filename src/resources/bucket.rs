@@ -1,8 +1,11 @@
-use crate::resources::{
-    bucket_access_control::{BucketAccessControl, NewBucketAccessControl},
-    default_object_access_control::{DefaultObjectAccessControl, NewDefaultObjectAccessControl},
+use crate::error::{Error, GoogleResponse};
+use crate::resources::bucket_access_control::{BucketAccessControl, NewBucketAccessControl};
+pub use crate::resources::common::Entity;
+use crate::resources::common::ListResponse;
+use crate::resources::default_object_access_control::{
+    DefaultObjectAccessControl, NewDefaultObjectAccessControl,
 };
-pub use crate::resources::{common::Entity, location::*};
+pub use crate::resources::location::*;
 
 /// The Buckets resource represents a
 /// [bucket](https://cloud.google.com/storage/docs/key-terms#buckets) in Google Cloud Storage. There
@@ -51,7 +54,7 @@ pub struct Bucket {
     /// responses, and requests that specify this field fail.
     pub default_object_acl: Option<Vec<DefaultObjectAccessControl>>,
     /// The bucket's IAM configuration.
-    pub iam_configuration: Option<IamConfiguration>,
+    pub iam_configuration: IamConfiguration,
     /// Encryption configuration for a bucket.
     pub encryption: Option<Encryption>,
     /// The owner of the bucket. This is always the project team's owner group.
@@ -246,6 +249,7 @@ pub struct Cors {
     pub response_header: Vec<String>,
     /// The value, in seconds, to return in the Access-Control-Max-Age header used in preflight
     /// responses.
+    #[serde(deserialize_with = "crate::from_str")]
     pub max_age_seconds: i32,
 }
 
@@ -297,7 +301,7 @@ pub struct Condition {
     /// A date in `RFC 3339` format with only the date part (for instance, "2013-01-15"). This
     /// condition is satisfied when an object is created before midnight of the specified date in
     /// UTC.
-    pub created_before: Option<chrono::NaiveDate>,
+    pub created_before: Option<chrono::DateTime<chrono::Utc>>,
     /// Relevant only for versioned objects. If the value is true, this condition matches the live
     /// version of objects; if the value is `false`, it matches noncurrent versions of objects.
     pub is_live: Option<bool>,
@@ -557,18 +561,33 @@ impl Bucket {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "global-client")]
     pub async fn create(new_bucket: &NewBucket) -> crate::Result<Self> {
-        crate::CLOUD_CLIENT.bucket().create(new_bucket).await
+        let url = format!("{}/b/", crate::BASE_URL);
+        let project = &crate::SERVICE_ACCOUNT.project_id;
+        let query = [("project", project)];
+        let result: GoogleResponse<Self> = reqwest::Client::new()
+            .post(&url)
+            .headers(crate::get_headers().await?)
+            .query(&query)
+            .json(new_bucket)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(s) => Ok(s),
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
     /// The synchronous equivalent of `Bucket::create`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn create_sync(new_bucket: &NewBucket) -> crate::Result<Self> {
-        crate::runtime()?.block_on(Self::create(new_bucket))
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn create_sync(new_bucket: &NewBucket) -> crate::Result<Self> {
+        Self::create(new_bucket).await
     }
 
     /// Returns all `Bucket`s within this project.
@@ -586,18 +605,32 @@ impl Bucket {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "global-client")]
-    pub async fn list() -> crate::Result<Vec<Self>> {
-        crate::CLOUD_CLIENT.bucket().list().await
+    pub async fn list() -> Result<Vec<Self>, Error> {
+        let url = format!("{}/b/", crate::BASE_URL);
+        let project = &crate::SERVICE_ACCOUNT.project_id;
+        let query = [("project", project)];
+        let result: GoogleResponse<ListResponse<Self>> = reqwest::Client::new()
+            .get(&url)
+            .headers(crate::get_headers().await?)
+            .query(&query)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(s) => Ok(s.items),
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
     /// The synchronous equivalent of `Bucket::list`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn list_sync() -> crate::Result<Vec<Self>> {
-        crate::runtime()?.block_on(Self::list())
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn list_sync() -> Result<Vec<Self>, Error> {
+        Self::list().await
     }
 
     /// Returns a single `Bucket` by its name. If the Bucket does not exist, an error is returned.
@@ -618,18 +651,29 @@ impl Bucket {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "global-client")]
     pub async fn read(name: &str) -> crate::Result<Self> {
-        crate::CLOUD_CLIENT.bucket().read(name).await
+        let url = format!("{}/b/{}", crate::BASE_URL, name);
+        let result: GoogleResponse<Self> = reqwest::Client::new()
+            .get(&url)
+            .headers(crate::get_headers().await?)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(s) => Ok(s),
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
     /// The synchronous equivalent of `Bucket::read`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn read_sync(name: &str) -> crate::Result<Self> {
-        crate::runtime()?.block_on(Self::read(name))
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn read_sync(name: &str) -> crate::Result<Self> {
+        Self::read(name).await
     }
 
     /// Update an existing `Bucket`. If you declare you bucket as mutable, you can edit its fields.
@@ -657,18 +701,30 @@ impl Bucket {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "global-client")]
     pub async fn update(&self) -> crate::Result<Self> {
-        crate::CLOUD_CLIENT.bucket().update(self).await
+        let url = format!("{}/b/{}", crate::BASE_URL, self.name);
+        let result: GoogleResponse<Self> = reqwest::Client::new()
+            .put(&url)
+            .headers(crate::get_headers().await?)
+            .json(self)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(s) => Ok(s),
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
     /// The synchronous equivalent of `Bucket::update`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn update_sync(&self) -> crate::Result<Self> {
-        crate::runtime()?.block_on(self.update())
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn update_sync(&self) -> crate::Result<Self> {
+        self.update().await
     }
 
     /// Delete an existing `Bucket`. This permanently removes a bucket from Google Cloud Storage.
@@ -691,18 +747,28 @@ impl Bucket {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "global-client")]
     pub async fn delete(self) -> crate::Result<()> {
-        crate::CLOUD_CLIENT.bucket().delete(self).await
+        let url = format!("{}/b/{}", crate::BASE_URL, self.name);
+        let response = reqwest::Client::new()
+            .delete(&url)
+            .headers(crate::get_headers().await?)
+            .send()
+            .await?;
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(Error::Google(response.json().await?))
+        }
     }
 
     /// The synchronous equivalent of `Bucket::delete`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn delete_sync(self) -> crate::Result<()> {
-        crate::runtime()?.block_on(self.delete())
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn delete_sync(self) -> crate::Result<()> {
+        self.delete().await
     }
 
     /// Returns the [IAM Policy](https://cloud.google.com/iam/docs/) for this bucket.
@@ -724,18 +790,29 @@ impl Bucket {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "global-client")]
     pub async fn get_iam_policy(&self) -> crate::Result<IamPolicy> {
-        crate::CLOUD_CLIENT.bucket().get_iam_policy(self).await
+        let url = format!("{}/b/{}/iam", crate::BASE_URL, self.name);
+        let result: GoogleResponse<IamPolicy> = reqwest::Client::new()
+            .get(&url)
+            .headers(crate::get_headers().await?)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(s) => Ok(s),
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
     /// The synchronous equivalent of `Bucket::get_iam_policy`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn get_iam_policy_sync(&self) -> crate::Result<IamPolicy> {
-        crate::runtime()?.block_on(self.get_iam_policy())
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn get_iam_policy_sync(&self) -> crate::Result<IamPolicy> {
+        self.get_iam_policy().await
     }
 
     /// Updates the [IAM Policy](https://cloud.google.com/iam/docs/) for this bucket.
@@ -769,18 +846,30 @@ impl Bucket {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "global-client")]
     pub async fn set_iam_policy(&self, iam: &IamPolicy) -> crate::Result<IamPolicy> {
-        crate::CLOUD_CLIENT.bucket().set_iam_policy(self, iam).await
+        let url = format!("{}/b/{}/iam", crate::BASE_URL, self.name);
+        let result: GoogleResponse<IamPolicy> = reqwest::Client::new()
+            .put(&url)
+            .headers(crate::get_headers().await?)
+            .json(iam)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(s) => Ok(s),
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
     /// The synchronous equivalent of `Bucket::set_iam_policy`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn set_iam_policy_sync(&self, iam: &IamPolicy) -> crate::Result<IamPolicy> {
-        crate::runtime()?.block_on(self.set_iam_policy(iam))
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn set_iam_policy_sync(&self, iam: &IamPolicy) -> crate::Result<IamPolicy> {
+        self.set_iam_policy(iam).await
     }
 
     /// Checks whether the user provided in the service account has this permission.
@@ -795,21 +884,38 @@ impl Bucket {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "global-client")]
     pub async fn test_iam_permission(&self, permission: &str) -> crate::Result<TestIamPermission> {
-        crate::CLOUD_CLIENT
-            .bucket()
-            .test_iam_permission(self, permission)
-            .await
+        if permission == "storage.buckets.list" || permission == "storage.buckets.create" {
+            return Err(Error::new(
+                "tested permission must not be `storage.buckets.list` or `storage.buckets.create`",
+            ));
+        }
+        let url = format!("{}/b/{}/iam/testPermissions", crate::BASE_URL, self.name);
+        let result: GoogleResponse<TestIamPermission> = reqwest::Client::new()
+            .get(&url)
+            .headers(crate::get_headers().await?)
+            .query(&[("permissions", permission)])
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(s) => Ok(s),
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
     /// The synchronous equivalent of `Bucket::test_iam_policy`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn test_iam_permission_sync(&self, permission: &str) -> crate::Result<TestIamPermission> {
-        crate::runtime()?.block_on(self.test_iam_permission(permission))
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn test_iam_permission_sync(
+        &self,
+        permission: &str,
+    ) -> crate::Result<TestIamPermission> {
+        self.test_iam_permission(permission).await
     }
 
     fn _lock_retention_policy() {
@@ -817,7 +923,7 @@ impl Bucket {
     }
 }
 
-#[cfg(all(test, feature = "global-client"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::resources::common::Role;
@@ -854,6 +960,16 @@ mod tests {
     #[tokio::test]
     async fn list() -> Result<(), Box<dyn std::error::Error>> {
         Bucket::list().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn read() -> Result<(), Box<dyn std::error::Error>> {
+        let bucket = crate::create_test_bucket("test-read").await;
+        let also_bucket = Bucket::read(&bucket.name).await?;
+        assert_eq!(bucket, also_bucket);
+        bucket.delete().await?;
+        assert!(also_bucket.delete().await.is_err());
         Ok(())
     }
 
@@ -913,7 +1029,7 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(all(feature = "global-client", feature = "sync"))]
+    #[cfg(feature = "sync")]
     mod sync {
         use super::*;
         use crate::resources::common::Role;

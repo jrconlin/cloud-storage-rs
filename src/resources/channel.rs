@@ -1,3 +1,5 @@
+
+
 pub struct Channel {
     pub id: String,
     pub resourceId: String,
@@ -9,17 +11,17 @@ impl Channel {
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
     #[cfg(feature = "sync")]
-    pub async fn stop_sync(&self) -> Result<(), crate::Error> {
-        crate::runtime()?.block_on(self.stop_async().await)
+    #[tokio::main]
+    pub async fn stop(&self) -> Result<(), crate::Error> {
+        self.stop_async().await
     }
 
-    pub async fn stop(&self) -> Result<(), crate::Error> {
+    pub async fn stop_async(&self) -> Result<(), crate::Error> {
         let url = format!("{}/channels/stop", crate::BASE_URL);
-        let response = create::CLIENT
+        let response = reqwest::Client::new()
             .post(&url)
             .headers(crate::get_headers().await?)
-            .send()
-            .await?;
+            .send().await?;
         if response.status().is_success() {
             Ok(())
         } else {

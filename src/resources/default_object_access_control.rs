@@ -1,7 +1,8 @@
 #![allow(unused_imports)]
 
+use crate::error::GoogleResponse;
+use crate::resources::common::ListResponse;
 pub use crate::resources::common::{Entity, ProjectTeam, Role};
-use crate::{error::GoogleResponse, resources::common::ListResponse};
 
 /// The DefaultObjectAccessControls resources represent the Access Control Lists (ACLs) applied to a
 /// new object within Google Cloud Storage when no ACL was provided for that object. ACLs let you
@@ -97,27 +98,39 @@ impl DefaultObjectAccessControl {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "global-client")]
     pub async fn create(
         bucket: &str,
         new_acl: &NewDefaultObjectAccessControl,
     ) -> crate::Result<Self> {
-        crate::CLOUD_CLIENT
-            .default_object_access_control()
-            .create(bucket, new_acl)
-            .await
+        let url = format!("{}/b/{}/defaultObjectAcl", crate::BASE_URL, bucket);
+        let result: GoogleResponse<Self> = reqwest::Client::new()
+            .post(&url)
+            .headers(crate::get_headers().await?)
+            .json(new_acl)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(mut s) => {
+                s.bucket = bucket.to_string();
+                Ok(s)
+            }
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
     /// The synchronous equivalent of `DefautObjectAccessControl::create`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn create_sync(
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn create_sync(
         bucket: &str,
         new_acl: &NewDefaultObjectAccessControl,
     ) -> crate::Result<Self> {
-        crate::runtime()?.block_on(Self::create(bucket, new_acl))
+        Self::create(bucket, new_acl).await
     }
 
     /// Retrieves default object ACL entries on the specified bucket.
@@ -135,21 +148,36 @@ impl DefaultObjectAccessControl {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "global-client")]
     pub async fn list(bucket: &str) -> crate::Result<Vec<Self>> {
-        crate::CLOUD_CLIENT
-            .default_object_access_control()
-            .list(bucket)
-            .await
+        let url = format!("{}/b/{}/defaultObjectAcl", crate::BASE_URL, bucket);
+        let result: GoogleResponse<ListResponse<Self>> = reqwest::Client::new()
+            .get(&url)
+            .headers(crate::get_headers().await?)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(s) => Ok(s
+                .items
+                .into_iter()
+                .map(|item| DefaultObjectAccessControl {
+                    bucket: bucket.to_string(),
+                    ..item
+                })
+                .collect()),
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
     /// The synchronous equivalent of `DefautObjectAccessControl::list`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn list_sync(bucket: &str) -> crate::Result<Vec<Self>> {
-        crate::runtime()?.block_on(Self::list(bucket))
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn list_sync(bucket: &str) -> crate::Result<Vec<Self>> {
+        Self::list(bucket).await
     }
 
     /// Read a single `DefaultObjectAccessControl`.
@@ -171,21 +199,37 @@ impl DefaultObjectAccessControl {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "global-client")]
     pub async fn read(bucket: &str, entity: &Entity) -> crate::Result<Self> {
-        crate::CLOUD_CLIENT
-            .default_object_access_control()
-            .read(bucket, entity)
-            .await
+        let url = format!(
+            "{}/b/{}/defaultObjectAcl/{}",
+            crate::BASE_URL,
+            bucket,
+            entity
+        );
+        let result: GoogleResponse<Self> = reqwest::Client::new()
+            .get(&url)
+            .headers(crate::get_headers().await?)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(mut s) => {
+                s.bucket = bucket.to_string();
+                Ok(s)
+            }
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
     /// The synchronous equivalent of `DefautObjectAccessControl::read`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn read_sync(bucket: &str, entity: &Entity) -> crate::Result<Self> {
-        crate::runtime()?.block_on(Self::read(bucket, entity))
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn read_sync(bucket: &str, entity: &Entity) -> crate::Result<Self> {
+        Self::read(bucket, entity).await
     }
 
     /// Update the current `DefaultObjectAccessControl`.
@@ -205,21 +249,38 @@ impl DefaultObjectAccessControl {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "global-client")]
     pub async fn update(&self) -> crate::Result<Self> {
-        crate::CLOUD_CLIENT
-            .default_object_access_control()
-            .update(self)
-            .await
+        let url = format!(
+            "{}/b/{}/defaultObjectAcl/{}",
+            crate::BASE_URL,
+            self.bucket,
+            self.entity
+        );
+        let result: GoogleResponse<Self> = reqwest::Client::new()
+            .put(&url)
+            .headers(crate::get_headers().await?)
+            .json(self)
+            .send()
+            .await?
+            .json()
+            .await?;
+        match result {
+            GoogleResponse::Success(mut s) => {
+                s.bucket = self.bucket.to_string();
+                Ok(s)
+            }
+            GoogleResponse::Error(e) => Err(e.into()),
+        }
     }
 
     /// The synchronous equivalent of `DefautObjectAccessControl::update`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn update_sync(&self) -> crate::Result<Self> {
-        crate::runtime()?.block_on(self.update())
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn update_sync(&self) -> crate::Result<Self> {
+        self.update().await
     }
 
     /// Delete this 'DefaultObjectAccessControl`.
@@ -238,25 +299,37 @@ impl DefaultObjectAccessControl {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "global-client")]
     pub async fn delete(self) -> Result<(), crate::Error> {
-        crate::CLOUD_CLIENT
-            .default_object_access_control()
-            .delete(self)
-            .await
+        let url = format!(
+            "{}/b/{}/defaultObjectAcl/{}",
+            crate::BASE_URL,
+            self.bucket,
+            self.entity
+        );
+        let response = reqwest::Client::new()
+            .delete(&url)
+            .headers(crate::get_headers().await?)
+            .send()
+            .await?;
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(crate::Error::Google(response.json().await?))
+        }
     }
 
-    /// The synchronous equivalent of `DefautObjectAccessControl::delete`.
+    /// The async equivalent of `DefautObjectAccessControl::delete`.
     ///
     /// ### Features
     /// This function requires that the feature flag `sync` is enabled in `Cargo.toml`.
-    #[cfg(all(feature = "global-client", feature = "sync"))]
-    pub fn delete_sync(self) -> Result<(), crate::Error> {
-        crate::runtime()?.block_on(self.delete())
+    #[cfg(feature = "sync")]
+    #[tokio::main]
+    pub async fn delete_sync(self) -> Result<(), crate::Error> {
+        self.delete().await
     }
 }
 
-#[cfg(all(test, feature = "global-client"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -311,7 +384,7 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(all(feature = "global-client", feature = "sync"))]
+    #[cfg(feature = "sync")]
     mod sync {
         use super::*;
 

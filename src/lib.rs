@@ -18,7 +18,7 @@
 //! Add the following line to your `Cargo.toml`
 //! ```toml
 //! [dependencies]
-//! cloud-storage = "0.10"
+//! cloud-storage = "0.6"
 //! ```
 //! The two most important concepts are [Buckets](bucket/struct.Bucket.html), which represent
 //! file systems, and [Objects](object/struct.Object.html), which represent files.
@@ -26,31 +26,29 @@
 //! ## Examples:
 //! Creating a new Bucket in Google Cloud Storage:
 //! ```rust
-//! # use cloud_storage::{Client, Bucket, NewBucket};
+//! # use cloud_storage::{Bucket, NewBucket};
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let client = Client::default();
-//! let bucket = client.bucket().create(&NewBucket {
+//! let bucket = Bucket::create(&NewBucket {
 //!     name: "doctest-bucket".to_string(),
 //!     ..Default::default()
 //! }).await?;
-//! # client.bucket().delete(bucket).await?;
+//! # bucket.delete().await?;
 //! # Ok(())
 //! # }
 //! ```
 //! Connecting to an existing Bucket in Google Cloud Storage:
 //! ```no_run
-//! # use cloud_storage::{Client, Bucket};
+//! # use cloud_storage::Bucket;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let client = Client::default();
-//! let bucket = client.bucket().read("mybucket").await?;
+//! let bucket = Bucket::read("mybucket").await?;
 //! # Ok(())
 //! # }
 //! ```
 //! Read a file from disk and store it on googles server:
 //! ```rust,no_run
-//! # use cloud_storage::{Client, Object};
+//! # use cloud_storage::Object;
 //! # use std::fs::File;
 //! # use std::io::Read;
 //! # #[tokio::main]
@@ -59,59 +57,55 @@
 //! for byte in File::open("myfile.txt")?.bytes() {
 //!     bytes.push(byte?)
 //! }
-//! let client = Client::default();
-//! client.object().create("mybucket", bytes, "myfile.txt", "text/plain").await?;
+//! Object::create("mybucket", bytes, "myfile.txt", "text/plain").await?;
 //! # Ok(())
 //! # }
 //! ```
 //! Renaming/moving a file
 //! ```rust,no_run
-//! # use cloud_storage::{Client, Object};
+//! # use cloud_storage::Object;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let client = Client::default();
-//! let mut object = client.object().read("mybucket", "myfile").await?;
+//! let mut object = Object::read("mybucket", "myfile").await?;
 //! object.name = "mybetterfile".to_string();
-//! client.object().update(&object).await?;
+//! object.update().await?;
 //! # Ok(())
 //! # }
 //! ```
 //! Removing a file
 //! ```rust,no_run
-//! # use cloud_storage::{Client, Object};
+//! # use cloud_storage::Object;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let client = Client::default();
-//! client.object().delete("mybucket", "myfile").await?;
+//! Object::delete("mybucket", "myfile").await?;
 //! # Ok(())
 //! # }
 //! ```
 #![forbid(unsafe_code, missing_docs)]
 
-pub mod client;
-#[cfg(feature = "sync")]
-pub mod sync;
-
 mod download_options;
-mod error;
 /// Contains objects as represented by Google, to be used for serialization and deserialization.
+mod error;
 mod resources;
 mod token;
 
-pub use crate::{
-    client::Client,
-    error::*,
-    resources::{
-        bucket::{Bucket, NewBucket},
-        object::{ListRequest, Object},
-        *,
-    },
-};
-use crate::{resources::service_account::ServiceAccount, token::Token};
 pub use download_options::DownloadOptions;
+pub use crate::error::*;
+use crate::resources::service_account::ServiceAccount;
+pub use crate::resources::{
+    bucket::{Bucket, NewBucket},
+    object::Object,
+    *,
+};
+use crate::token::Token;
 use tokio::sync::Mutex;
 
 lazy_static::lazy_static! {
+    /// Static `Token` struct that caches
+    static ref TOKEN_CACHE: Mutex<Token> = Mutex::new(Token::new(
+        "https://www.googleapis.com/auth/devstorage.full_control",
+    ));
+
     static ref IAM_TOKEN_CACHE: Mutex<Token> = Mutex::new(Token::new(
         "https://www.googleapis.com/auth/iam"
     ));
@@ -122,15 +116,21 @@ lazy_static::lazy_static! {
     pub static ref SERVICE_ACCOUNT: ServiceAccount = ServiceAccount::get();
 }
 
-#[cfg(feature = "global-client")]
-lazy_static::lazy_static! {
-    static ref CLOUD_CLIENT: client::Client = client::Client::default();
-}
-
 /// A type alias where the error is set to be `cloud_storage::Error`.
 pub type Result<T> = std::result::Result<T, crate::Error>;
 
-const BASE_URL: &str = "https://storage.googleapis.com/storage/v1";
+const BASE_URL: &str = "https://www.googleapis.com/storage/v1";
+
+async fn get_headers() -> Result<reqwest::header::HeaderMap> {
+    let mut result = reqwest::header::HeaderMap::new();
+    let mut guard = TOKEN_CACHE.lock().await;
+    let token = guard.get().await?;
+    result.insert(
+        reqwest::header::AUTHORIZATION,
+        format!("Bearer {}", token).parse().unwrap(),
+    );
+    Ok(result)
+}
 
 fn from_str<'de, T, D>(deserializer: D) -> std::result::Result<T, D::Error>
 where
@@ -163,12 +163,14 @@ where
     }
 }
 
-#[cfg(all(test, feature = "global-client", feature = "sync"))]
-fn read_test_bucket_sync() -> Bucket {
-    crate::runtime().unwrap().block_on(read_test_bucket())
+#[cfg(test)]
+#[cfg(feature = "sync")]
+#[tokio::main]
+async fn read_test_bucket_sync() -> Bucket {
+    read_test_bucket().await
 }
 
-#[cfg(all(test, feature = "global-client"))]
+#[cfg(test)]
 async fn read_test_bucket() -> Bucket {
     dotenv::dotenv().ok();
     let name = std::env::var("TEST_BUCKET").unwrap();
@@ -185,14 +187,16 @@ async fn read_test_bucket() -> Bucket {
 
 // since all tests run in parallel, we need to make sure we do not create multiple buckets with
 // the same name in each test.
-#[cfg(all(test, feature = "global-client", feature = "sync"))]
-fn create_test_bucket_sync(name: &str) -> Bucket {
-    crate::runtime().unwrap().block_on(create_test_bucket(name))
+#[cfg(test)]
+#[cfg(feature = "sync")]
+#[tokio::main]
+async fn create_test_bucket_sync(name: &str) -> Bucket {
+    create_test_bucket(name).await
 }
 
 // since all tests run in parallel, we need to make sure we do not create multiple buckets with
 // the same name in each test.
-#[cfg(all(test, feature = "global-client"))]
+#[cfg(test)]
 async fn create_test_bucket(name: &str) -> Bucket {
     std::thread::sleep(std::time::Duration::from_millis(1500)); // avoid getting rate limited
 
@@ -207,13 +211,4 @@ async fn create_test_bucket(name: &str) -> Bucket {
         Ok(bucket) => bucket,
         Err(_alread_exists) => Bucket::read(&new_bucket.name).await.unwrap(),
     }
-}
-
-#[cfg(feature = "sync")]
-fn runtime() -> Result<tokio::runtime::Runtime> {
-    Ok(tokio::runtime::Builder::new_current_thread()
-        .thread_name("cloud-storage-worker")
-        .enable_time()
-        .enable_io()
-        .build()?)
 }

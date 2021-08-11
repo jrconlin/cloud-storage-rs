@@ -31,7 +31,7 @@ pub struct Notification {
     /// The canonical URL of this notification.
     #[serde(rename = "selfLink")]
     self_link: String,
-    /// The kind of item this is. For notifications, this is always `storage#notification`.
+    /// The kind of item this is. For notifications, this is always `storage#notification`.   
     kind: String,
 }
 
@@ -68,7 +68,8 @@ impl Notification {
     /// Creates a notification subscription for a given bucket.
     pub fn create(bucket: &str, new_notification: &NewNotification) -> Result<Self, crate::Error> {
         let url = format!("{}/b/{}/notificationConfigs", crate::BASE_URL, bucket);
-        let result: GoogleResponse<Self> = crate::CLIENT
+        let client = reqwest::blocking::Client::new();
+        let result: GoogleResponse<Self> = client
             .post(&url)
             .headers(crate::get_headers()?)
             .json(new_notification)
@@ -88,7 +89,8 @@ impl Notification {
             bucket,
             notification
         );
-        let result: GoogleResponse<Self> = crate::CLIENT;
+        let client = reqwest::blocking::Client::new();
+        let result: GoogleResponse<Self> = client
             .get(&url)
             .headers(crate::get_headers()?)
             .send()?
@@ -102,7 +104,8 @@ impl Notification {
     /// Retrieves a list of notification subscriptions for a given bucket.}
     pub fn list(bucket: &str) -> Result<Vec<Self>, crate::Error> {
         let url = format!("{}/v1/b/{}/notificationConfigs", crate::BASE_URL, bucket);
-        let result: GoogleResponse<ListResponse<Self>> = crate::CLIENT
+        let client = reqwest::blocking::Client::new();
+        let result: GoogleResponse<ListResponse<Self>> = client
             .get(&url)
             .headers(crate::get_headers()?)
             .send()?
@@ -121,7 +124,8 @@ impl Notification {
             bucket,
             notification
         );
-        let response = crate::CLIENT.get(&url).headers(crate::get_headers()?).send()?;
+        let client = reqwest::blocking::Client::new();
+        let response = client.get(&url).headers(crate::get_headers()?).send()?;
         if response.status().is_success() {
             Ok(())
         } else {
